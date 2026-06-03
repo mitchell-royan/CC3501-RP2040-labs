@@ -1,9 +1,8 @@
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "WS2812.pio.h"
-#include "drivers/leds.h"
-
-#define LED_PIN 14
+#include "drivers/leds/leds.h"
+#include "board.h"
 
 int main() {
     stdio_init_all();

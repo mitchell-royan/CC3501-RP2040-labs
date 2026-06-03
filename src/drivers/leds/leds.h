@@ -2,9 +2,8 @@
 
 #include <stdint.h>
 #include "hardware/pio.h"
+#include "board.h"
 
-// Number of LEDs on the board
-#define NUM_LEDS 12
 
 // A single RGB colour
 struct Colour {
