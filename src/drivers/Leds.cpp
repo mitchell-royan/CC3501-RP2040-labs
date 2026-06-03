@@ -1,161 +1,85 @@
-// WS2812 LED chain driver — buffered, object-oriented interface.
-
 #include "leds.h"
 
-#include <stdlib.h>    // malloc / free
-#include <string.h>    // memcpy / memset
+// HSV to RGB
 
-#include "pico/stdlib.h"
-#include "hardware/pio.h"
-#include "WS2812.pio.h"
-
-
-RGBColour hsv_to_rgb(HSVColour hsv)
-{
-    // Clamp inputs
-    float h = hsv.hue;
-    float s = hsv.saturation;
-    float v = hsv.value;
-
-    if (s <= 0.0f) {
-        // Achromatic (grey)
-        uint8_t grey = (uint8_t)(v * 255.0f);
-        return RGBColour(grey, grey, grey);
+Colour hsv_to_rgb(HSV hsv) {
+    if (hsv.sat == 0) {
+        return {hsv.val, hsv.val, hsv.val};
     }
 
-    // Wrap hue into [0, 360)
-    while (h >= 360.0f) h -= 360.0f;
-    while (h <    0.0f) h += 360.0f;
+    uint8_t sector   = hsv.hue / 60;
+    uint8_t fraction = (hsv.hue % 60) * 255 / 60;
 
-    float sector = h / 60.0f;
-    int   i      = (int)sector;
-    float f      = sector - (float)i; // fractional part of sector
+    uint8_t v = hsv.val;
+    uint8_t p = (uint32_t)v * (255 - hsv.sat) / 255;
+    uint8_t q = (uint32_t)v * (255 - (uint32_t)hsv.sat * fraction / 255) / 255;
+    uint8_t t = (uint32_t)v * (255 - (uint32_t)hsv.sat * (255 - fraction) / 255) / 255;
 
-    float p = v * (1.0f - s);
-    float q = v * (1.0f - s * f);
-    float t = v * (1.0f - s * (1.0f - f));
-
-    float r, g, b;
-    switch (i) {
-        case 0:  r = v; g = t; b = p; break;
-        case 1:  r = q; g = v; b = p; break;
-        case 2:  r = p; g = v; b = t; break;
-        case 3:  r = p; g = q; b = v; break;
-        case 4:  r = t; g = p; b = v; break;
-        default: r = v; g = p; b = q; break; // case 5
-    }
-
-    return RGBColour(
-        (uint8_t)(r * 255.0f),
-        (uint8_t)(g * 255.0f),
-        (uint8_t)(b * 255.0f)
-    );
-}
-
-// LEDDriver — constructor / destructor
-
-LEDDriver::LEDDriver(PIO pio, uint sm, uint program_offset, uint pin, uint num_leds)
-    : _pio(pio), _sm(sm), _pin(pin), _num_leds(num_leds), _dirty(false)
-{
-    // Allocate and zero-initialise both buffers
-    _staged    = new RGBColour[num_leds]();
-    _committed = new RGBColour[num_leds]();
-
-    // Initialise the PIO state machine for the WS2812 protocol
-    ws2812_program_init(pio, sm, program_offset, pin, 800000, false);
-}
-
-LEDDriver::~LEDDriver()
-{
-    delete[] _staged;
-    delete[] _committed;
-}
-
-// Private helpers
-
-uint32_t LEDDriver::pack_grb(RGBColour c)
-{
-    // The WS2812 protocol uses GRB order.
-    // The PIO program shifts out the top 24 bits MSB-first.
-    return ((uint32_t)c.red << 24)
-         | ((uint32_t)c.green   << 16)
-         | ((uint32_t)c.blue  <<  8);
-}
-
-// Single-LED control
-
-void LEDDriver::set_led(uint index, RGBColour colour)
-{
-    if (index >= _num_leds) return;
-
-    if (_staged[index] != colour) {
-        _staged[index] = colour;
-        _dirty = true;
+    switch (sector) {
+        case 0: return {v, t, p};
+        case 1: return {q, v, p};
+        case 2: return {p, v, t};
+        case 3: return {p, q, v};
+        case 4: return {t, p, v};
+        default: return {v, p, q};
     }
 }
 
-void LEDDriver::set_led(uint index, HSVColour colour)
+// LEDDriver
+
+LEDDriver::LEDDriver(PIO pio, uint sm) : _pio(pio), _sm(sm)
 {
-    set_led(index, hsv_to_rgb(colour));
+    for (int i = 0; i < NUM_LEDS; i++) {
+        _state[i] = Colours::OFF;
+    }
+    show();
 }
 
-// Multi-LED control
-
-void LEDDriver::set_leds(uint start_index, const RGBColour *colours, uint count)
+void LEDDriver::set(uint8_t index, Colour colour)
 {
-    for (uint i = 0; i < count; ++i) {
-        set_led(start_index + i, colours[i]);
+    if (index >= NUM_LEDS) return;
+    _state[index] = colour;
+    _dirty = true;
+}
+
+void LEDDriver::set_hsv(uint8_t index, HSV colour)
+{
+    set(index, hsv_to_rgb(colour));
+}
+
+void LEDDriver::set_multiple(const LEDUpdate* updates, uint8_t count)
+{
+    for (int i = 0; i < count; i++) {
+        set(updates[i].index, updates[i].colour);
     }
 }
 
-void LEDDriver::set_all(RGBColour colour)
+void LEDDriver::show()
 {
-    for (uint i = 0; i < _num_leds; ++i) {
-        set_led(i, colour);
-    }
-}
-
-void LEDDriver::set_all(HSVColour colour)
-{
-    set_all(hsv_to_rgb(colour));
-}
-
-// Convenience
-
-void LEDDriver::clear()
-{
-    set_all(RGBColour(0, 0, 0));
-}
-
-// Commit
-
-void LEDDriver::commit()
-{
-    for (uint i = 0; i < _num_leds; ++i) {
-        pio_sm_put_blocking(_pio, _sm, pack_grb(_staged[i]));
-    }
-
-    // Mirror staged → committed and clear dirty flag
-    for (uint i = 0; i < _num_leds; ++i) {
-        _committed[i] = _staged[i];
+    for (int i = 0; i < NUM_LEDS; i++) {
+        uint32_t word = ((uint32_t)_state[i].red   << 24)
+                      | ((uint32_t)_state[i].green << 16)
+                      | ((uint32_t)_state[i].blue  <<  8);
+        pio_sm_put_blocking(_pio, _sm, word);
     }
     _dirty = false;
 }
 
-// Query
-
-RGBColour LEDDriver::get_led(uint index) const
+void LEDDriver::clear()
 {
-    if (index >= _num_leds) return RGBColour();
-    return _staged[index];
+    for (int i = 0; i < NUM_LEDS; i++) {
+        _state[i] = Colours::OFF;
+    }
+    _dirty = true;
 }
 
-uint LEDDriver::get_num_leds() const
+Colour LEDDriver::get(uint8_t index) const
 {
-    return _num_leds;
+    if (index >= NUM_LEDS) return Colours::OFF;
+    return _state[index];
 }
 
-bool LEDDriver::has_pending_changes() const
+bool LEDDriver::is_dirty() const
 {
     return _dirty;
 }
