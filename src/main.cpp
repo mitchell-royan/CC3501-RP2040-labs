@@ -6,35 +6,101 @@
 #include "board.h"
 #include <stdio.h>
 
-int main() {
-    stdio_init_all();
-    sleep_ms(10000);
+static float clampf(float v) {
+    if (v < -1.0f) return -1.0f;
+    if (v >  1.0f) return  1.0f;
+    return v;
+}
  
-    // Initialise LEDs
-    uint offset = pio_add_program(pio0, &ws2812_program);
-    ws2812_program_init(pio0, 0, offset, LED_PIN, 800000, false);
-    LEDDriver leds(pio0, 0);
+// X tilt: negative = tilted left, positive = tilted right.
+// Light the LEFT column when tilting left, RIGHT column when tilting right.
+// The higher the tilt the further up the column the LED moves.
+static void show_x_tilt(LEDDriver& leds, float x) {
+    float mag = x < 0 ? -x : x;
+    if (mag < 0.1f) return;
  
-    // Initialise accelerometer
-    LIS3DH accel;
-    if (!accel.init()) {
-        printf("Accelerometer init FAILED\n");
+    // Map 0..1 tilt to row index 0..3 (0 = bottom, 3 = top)
+    int row = (int)(mag * 3.5f);
+    if (row > 3) row = 3;
+ 
+    if (x < 0) {
+        // Tilted left — light left column (0=bottom, 3=top)
+        leds.set(row, Colours::RED);
+    } else {
+        // Tilted right — light right column (11=bottom, 8=top)
+        leds.set(11 - row, Colours::RED);
     }
-    printf("Accelerometer init OK\n\n");
+}
  
-    // Print raw and g-force values in a loop
+// Y tilt: positive = tilted forward (top goes down), negative = tilted back.
+// Light the TOP row when tilting forward, bottom corners when tilting back.
+static void show_y_tilt(LEDDriver& leds, float y) {
+    float mag = y < 0 ? -y : y;
+    if (mag < 0.1f) return;
+ 
+    if (y > 0) {
+        // Tilted forward — light a position across the top row (4-7)
+        int pos = (int)(mag * 3.5f);
+        if (pos > 3) pos = 3;
+        leds.set(4 + pos, Colours::BLUE);
+    } else {
+        // Tilted back — light both bottom corners
+        leds.set(0, Colours::BLUE);
+        leds.set(11, Colours::BLUE);
+    }
+}
+ 
+void spirit_level(LEDDriver& leds, LIS3DH& accel) {
     while (true) {
         AccelRaw raw = accel.read_raw();
         AccelG   g   = accel.to_g(raw);
  
-        // Raw integer values
-        printf("Raw  X: %5d  Y: %5d  Z: %5d\n", raw.x, raw.y, raw.z);
+        float x = clampf(g.x);
+        float y = clampf(g.y);
  
-        // Converted g-force values
-        printf("G    X: %6.3f  Y: %6.3f  Z: %6.3f\n\n", g.x, g.y, g.z);
+        // tilt = 0 when perfectly flat (x=0, y=0), grows as board tilts
+        float tilt = x * x + y * y;
  
-        sleep_ms(500);
+        printf("X: %6.3fg  Y: %6.3fg  Z: %6.3fg\n", g.x, g.y, g.z);
+ 
+        leds.clear();
+ 
+        if (tilt < 0.02f) {
+            // Perfectly level — all green
+            for (int i = 0; i < NUM_LEDS; i++) {
+                leds.set(i, Colours::GREEN);
+            }
+        } else {
+            // Tilted — show red for X axis, blue for Y axis
+            show_x_tilt(leds, x);
+            show_y_tilt(leds, y);
+        }
+ 
+        leds.show();
+        sleep_ms(100);
     }
+}
+ 
+int main() {
+    stdio_init_all();
+    sleep_ms(500);
+ 
+    uint offset = pio_add_program(pio0, &ws2812_program);
+    ws2812_program_init(pio0, 0, offset, LED_PIN, 800000, false);
+    LEDDriver leds(pio0, 0);
+ 
+    LIS3DH accel;
+    if (!accel.init()) {
+        printf("Accelerometer init FAILED\n");
+        for (int i = 0; i < NUM_LEDS; i++) {
+            leds.set(i, Colours::RED);
+        }
+        leds.show();
+        while (true) {}
+    }
+    printf("Accelerometer init OK — spirit level running\n\n");
+ 
+    spirit_level(leds, accel);
 }
 
 //     // Set up the WS2812 PIO program and create the driver
