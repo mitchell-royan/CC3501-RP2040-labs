@@ -8,15 +8,33 @@
 
 int main() {
     stdio_init_all();
-    sleep_ms(10000);  // give USB serial time to connect
-
+    sleep_ms(10000);
+ 
+    // Initialise LEDs
+    uint offset = pio_add_program(pio0, &ws2812_program);
+    ws2812_program_init(pio0, 0, offset, LED_PIN, 800000, false);
+    LEDDriver leds(pio0, 0);
+ 
+    // Initialise accelerometer
     LIS3DH accel;
     if (!accel.init()) {
         printf("Accelerometer init FAILED\n");
-        while (true) {}
     }
-    printf("Accelerometer init OK\n");
-    while (true) {}
+    printf("Accelerometer init OK\n\n");
+ 
+    // Print raw and g-force values in a loop
+    while (true) {
+        AccelRaw raw = accel.read_raw();
+        AccelG   g   = accel.to_g(raw);
+ 
+        // Raw integer values
+        printf("Raw  X: %5d  Y: %5d  Z: %5d\n", raw.x, raw.y, raw.z);
+ 
+        // Converted g-force values
+        printf("G    X: %6.3f  Y: %6.3f  Z: %6.3f\n\n", g.x, g.y, g.z);
+ 
+        sleep_ms(500);
+    }
 }
 
 //     // Set up the WS2812 PIO program and create the driver
