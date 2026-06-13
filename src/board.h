@@ -1,5 +1,7 @@
 #pragma once
 
+#define BUTTON_PIN 15
+
 #define LED_PIN 14
 #define NUM_LEDS 12
 
