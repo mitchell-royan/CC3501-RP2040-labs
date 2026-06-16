@@ -146,8 +146,8 @@ static const int BIN_EDGES[NUM_LEDS + 1] = {
  
 // Threshold filters out noise floor; scale sets sensitivity.
 // These values will need tuning based on your environment.
-static constexpr int32_t ENERGY_THRESHOLD = 500;
-static constexpr int32_t ENERGY_SCALE     = 2000;
+static constexpr int32_t ENERGY_THRESHOLD = 250;
+static constexpr int32_t ENERGY_SCALE     = 1000;
  
 static void microphone_task(LEDDriver &leds)
 {

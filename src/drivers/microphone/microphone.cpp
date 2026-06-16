@@ -33,8 +33,8 @@ void microphone_init(void)
     // Configure the ADC FIFO
     adc_fifo_setup(
         true,   // write each conversion to the sample FIFO
-        false,  // disable DMA data request (DREQ)
-        1,      // DREQ (and IRQ) asserted when at least 1 sample present
+        false,  // disable DMA data request 
+        1,      // DREQ asserted when at least 1 sample present
         false,  // disable error bit
         false   // do not right-shift result to 8 bits
     );
